@@ -21,7 +21,12 @@ fn gd(s: &RawServer, retries: u32, idle: f64, response: f64) -> Client {
         .desk_token("gdagt_t")
         .base_url(&s.url)
         .e2e(E2eMode::Off)
-        .retry(RetryPolicy { max_retries: retries, initial_delay: Duration::from_millis(5), max_delay: Duration::from_secs(5) })
+        .retry(RetryPolicy {
+            max_retries: retries,
+            initial_delay: Duration::from_millis(5),
+            max_delay: Duration::from_secs(5),
+            ..RetryPolicy::default()
+        })
         .timeouts(Timeouts { response_timeout: Some(Duration::from_secs_f64(response)), idle_timeout: Some(Duration::from_secs_f64(idle)) })
         .build()
         .unwrap()

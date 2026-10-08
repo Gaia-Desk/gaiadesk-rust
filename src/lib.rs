@@ -61,6 +61,7 @@ mod http;
 mod lan;
 #[cfg(feature = "local")]
 pub mod local;
+mod retry;
 mod sse;
 mod stream;
 mod timeouts;
@@ -74,9 +75,10 @@ pub use client::{Client, ClientBuilder, API_FILE_LIMIT, API_WAIT_MAX, DEFAULT_AP
 pub use desk::Desk;
 pub use e2e::layer::{E2eMode, WarningHandler};
 pub use error::{desk_op_exit, error_envelope, reasons, Error, ErrorDetails, ErrorKind, ErrorObject, Result};
-pub use http::{CallOptions, RetryPolicy, Transport};
+pub use http::{CallOptions, Transport};
 #[cfg(feature = "lan")]
 pub use lan::normalize_fingerprint;
+pub use retry::RetryPolicy;
 pub use stream::{ExecEvent, ExecOutput, ExecStream, LogEvent, LogStream};
 pub use timeouts::{Timeouts, DEFAULT_IDLE_TIMEOUT, DEFAULT_RESPONSE_TIMEOUT};
 pub use types::*;

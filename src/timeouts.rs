@@ -10,6 +10,7 @@ use bytes::Bytes;
 
 use crate::error::{Error, ErrorDetails, ErrorKind, Result};
 use crate::http::{chain, Http};
+use crate::retry::{never_connected, NeverSent};
 
 /// How long the SDK waits on the network before giving up, so a server or
 /// proxy that stops answering (a dropped connection that is never closed, a
@@ -73,7 +74,8 @@ async fn within<F: Future>(limit: Option<Duration>, fut: F) -> Option<F::Output>
 
 impl Http {
     /// Send a request and wait for its answer to begin, within `response_timeout`.
-    pub(crate) async fn send_within(&self, rb: reqwest::RequestBuilder, op: &str) -> Result<reqwest::Response> {
+    /// `never_sent` is set when the connection was never made (nothing of the request left).
+    pub(crate) async fn send_within(&self, rb: reqwest::RequestBuilder, op: &str, never_sent: &NeverSent) -> Result<reqwest::Response> {
         match within(self.timeouts.response_timeout, rb.send()).await {
             // Dropping the request on the way closes its connection: it is not pooled.
             None => {
@@ -81,7 +83,10 @@ impl Http {
                 let msg = format!("{} did not answer {op} within {d:?} (response_timeout)", self.where_);
                 Err(Error::Unreachable(Box::new(ErrorDetails::new(ErrorKind::Timeout, msg).reason("timeout").exit(255).op(op))))
             }
-            Some(r) => r.map_err(|e| self.transport_error(&e, op)),
+            Some(r) => r.map_err(|e| {
+                never_sent.set(never_connected(&e));
+                self.transport_error(&e, op)
+            }),
         }
     }
 

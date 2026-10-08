@@ -20,14 +20,31 @@ All notable changes to this crate are documented here. The format follows
   `timeout`). Neither is retried; the connection is closed, not pooled.
 - A connection closed or reset before any answer is now `Error::Unreachable`
   (kind `network`, reason `network`), as in the other SDKs (it was
-  `ConnectionLost`), and is retried for `GET`s only: a request that changes
-  something (exec, upload, jobs, tokens, wake) is sent once. A connection
-  that could not be made is likewise retried for reads only. A 503 is
-  retried for reads, unless its reason does not change on its own
-  (`api_disabled`, `desk_ops_disabled`, `local_api_off`).
+  `ConnectionLost`).
 - Proven on a raw-socket test server: closed or reset before any response
   byte (with and without reading a 4 MiB upload), stalled mid-body, mid-JSON
-  and mid-stream, silent, and a 300-request stress run.
+  and mid-stream, silent, a 300-request stress run; refused until the server
+  appears, an untrusted certificate, 409/429/502/503/504 with and without
+  `Retry-After`, and a kept-alive connection closed unanswered.
+- One retry rule in every GaiaDesk SDK (`RetryPolicy`). Compared with 0.1.0:
+  - Now retried: a 503 for `GET`s (unless its reason is `api_disabled`,
+    `desk_ops_disabled` or `local_api_off`), honouring its `Retry-After`; a
+    409 `idempotency_key_in_flight` for any method; a missing or refusing
+    local socket or pipe, for any method.
+  - No longer retried: a certificate the TLS handshake rejects (now kind
+    `unreachable`, not `network`); and a `Retry-After` is honoured only on
+    a 429 or 503. Timeouts stay never retried.
+  - Unchanged: a connection never made (DNS, refused, the TLS handshake
+    broken off) is retried for any method; a connection lost after sending
+    for `GET`s only; 429 for any method; 502/504 for `GET`s; an
+    `Idempotency-Key` never makes a call retryable.
+  - New defaults: backoff 250 ms (was 500 ms) doubling up to 8 s (was 30 s),
+    times a random 0.5–1.0; 3 attempts in all, as before.
+  - `RetryPolicy::max_delay` is now only the backoff cap; the new
+    `RetryPolicy::max_retry_wait` (60 s, was `max_delay`'s 30 s) is the
+    longest `Retry-After` waited for. A longer one is not waited for: the
+    error carries it. A `RetryPolicy` written as a struct literal needs
+    `..RetryPolicy::default()` (or the new field).
 - The README's doctests compile only with every feature on, so
   `cargo test --no-default-features` passes.
 

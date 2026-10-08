@@ -384,13 +384,24 @@ SDK's kinds, so `offline` stays `offline`). `exit_code()` is what
 
 ## Retries, timeouts, idempotency
 
-- **Retries** (`RetryPolicy`, default 2 retries, 500 ms doubling with jitter,
-  at most 30 s): a 429 (rate limited or a busy desk: refused before anything
-  ran) for every operation, honouring `Retry-After`; and for `GET`s only a
-  connection that failed or was closed or reset before any answer, and a
-  502/503/504. A sealed operation is sealed afresh for each try. Operations
-  that change something are never sent twice after they may have run.
-  `RetryPolicy::none()` turns them off.
+- **Retries.** A request is sent again only when that cannot run anything twice:
+  - **The connection was never made** (DNS, refused, TLS handshake): any method — nothing was sent.
+  - **The connection was lost after sending, or the answer was 502, 503 or 504**: GETs only (reads).
+    A 503 that says the API or desk operations are switched off is not retried.
+  - **429** (`rate_limited`, `desk_busy`) and **409** `idempotency_key_in_flight`: any method — the server refused
+    it before acting.
+
+  Timeouts are never retried, and nothing is retried once its answer has begun. A call that changes something
+  (POST, PUT, DELETE) is never sent again after it may have reached the server; an `Idempotency-Key` is sent but
+  does not make a call retryable. 429 and 503 wait for `Retry-After`; one longer than `RetryPolicy::max_retry_wait`
+  (default 60 s) is not waited for — the error carries it. Otherwise the wait is exponential backoff with jitter:
+  `RetryPolicy::initial_delay` (default 250 ms) doubling up to `RetryPolicy::max_delay` (default 8 s), times a random 0.5–1.0.
+  `RetryPolicy::max_retries` (default 2, so 3 attempts in all) sets how many times; 0 turns retries off. Each retry of
+  a sealed operation is sealed afresh.
+
+  The HTTP stack (hyper-util's pool, under reqwest) re-sends a request by itself only when it never wrote a byte
+  of it (the pooled connection had closed first), so a POST, PUT or DELETE that may have reached the server is
+  never sent again by it.
 - **Timeouts** (`Timeouts`, `ClientBuilder::timeouts`) make a server or proxy
   that stops answering an error, never a hang, on every transport:
   - `response_timeout` (default 16 minutes, above the API's 15-minute call
@@ -404,10 +415,7 @@ SDK's kinds, so `offline` stays `offline`). `exit_code()` is what
     download to a file leaves nothing behind.
   - `None` is no limit (`Timeouts::none()`); zero is a usage error.
   - A connection closed or reset before any answer is an `Error::Unreachable`
-    (kind `network`) at once. The HTTP stack (hyper-util's pool, under
-    reqwest) re-sends a request by itself only when it never wrote it (the
-    pooled connection closed first), so `exec`, uploads, jobs, tokens and
-    wakes reach the server at most once unless the SDK's own policy allows.
+    (kind `network`) at once.
 - **Call timeout**: `ClientBuilder::timeout` (default 16 minutes) for each
   whole call; a stream or a download is timed until it starts.
   `connect_timeout` defaults to 30 s. Per call: `with_timeout`. `wait_job`

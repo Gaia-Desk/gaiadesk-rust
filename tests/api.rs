@@ -19,7 +19,12 @@ async fn client(desks: Vec<(&str, MockDesk)>) -> (common::Mock, Client) {
         .desk_token("gdagt_tok")
         .base_url(&m.url)
         .e2e(E2eMode::Off)
-        .retry(RetryPolicy { max_retries: 2, initial_delay: Duration::from_millis(5), max_delay: Duration::from_secs(5) })
+        .retry(RetryPolicy {
+            max_retries: 2,
+            initial_delay: Duration::from_millis(5),
+            max_delay: Duration::from_secs(5),
+            ..RetryPolicy::default()
+        })
         .build()
         .unwrap();
     (m, c)

@@ -29,6 +29,13 @@ pub enum RawMode {
     StallMidEvents,
     /// Read the request and never answer.
     Silent,
+    /// Read the whole request, answer this status (200: a small JSON result
+    /// that suits exec and token lists; else an error envelope with this
+    /// `Retry-After` and reason) and close.
+    Status(u16, Option<u32>, Option<&'static str>),
+    /// Answer the first request on a connection 200 with keep-alive; on the
+    /// next request on that same connection, close without answering.
+    KeepAliveThenClose,
 }
 
 #[derive(Default)]
@@ -49,12 +56,19 @@ impl RawServer {
         let l = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let url = format!("http://{}/v1", l.local_addr().unwrap());
         let shared = Arc::new(Mutex::new(Shared { mode: Some(mode), ..Shared::default() }));
+        let accept = tokio::spawn(accept_loop(l, shared.clone()));
+        RawServer { url, shared, accept }
+    }
+
+    /// A port where nothing listens (connections refused) until `after`, then this server.
+    pub async fn start_after(mode: RawMode, after: Duration) -> RawServer {
+        let addr = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap(); // bound, then closed
+        let url = format!("http://{addr}/v1");
+        let shared = Arc::new(Mutex::new(Shared { mode: Some(mode), ..Shared::default() }));
         let sh = shared.clone();
         let accept = tokio::spawn(async move {
-            while let Ok((s, _)) = l.accept().await {
-                let sh = sh.clone();
-                tokio::spawn(serve_tcp(s, sh));
-            }
+            tokio::time::sleep(after).await;
+            accept_loop(TcpListener::bind(addr).await.unwrap(), sh).await;
         });
         RawServer { url, shared, accept }
     }
@@ -74,6 +88,12 @@ impl Drop for RawServer {
     fn drop(&mut self) {
         self.accept.abort();
         self.shared.lock().unwrap().held.clear(); // held sockets closed at teardown
+    }
+}
+
+async fn accept_loop(l: TcpListener, sh: Arc<Mutex<Shared>>) {
+    while let Ok((s, _)) = l.accept().await {
+        tokio::spawn(serve_tcp(s, sh.clone()));
     }
 }
 
@@ -120,6 +140,22 @@ async fn serve_tcp(mut s: TcpStream, sh: Arc<Mutex<Shared>>) {
     let Some((head, rest)) = read_head(&mut s).await else { return };
     let mode = record(&sh, &head);
     match mode {
+        RawMode::Status(code, retry_after, reason) => {
+            read_body(&mut s, &head, rest).await;
+            let _ = s.write_all(status_answer(code, retry_after, reason, true).as_bytes()).await;
+            let _ = s.shutdown().await;
+        }
+        RawMode::KeepAliveThenClose => {
+            read_body(&mut s, &head, rest).await;
+            if s.write_all(status_answer(200, None, None, false).as_bytes()).await.is_err() {
+                return;
+            }
+            // The next request on this connection: counted, then closed unanswered.
+            if let Some((head, rest)) = read_head(&mut s).await {
+                record(&sh, &head);
+                read_body(&mut s, &head, rest).await;
+            }
+        }
         RawMode::CloseBeforeResponse => drop(s),
         RawMode::ResetBeforeResponse => {
             #[allow(deprecated)] // SO_LINGER 0: close() sends RST at once, it never blocks
@@ -144,6 +180,52 @@ fn record(sh: &Mutex<Shared>, head: &str) -> RawMode {
     let mut g = sh.lock().unwrap();
     *g.by_method.entry(method).or_default() += 1;
     g.mode.unwrap_or(RawMode::Silent)
+}
+
+/// A whole answer: 200 with a small JSON result, else an error envelope.
+fn status_answer(code: u16, retry_after: Option<u32>, reason: Option<&str>, close: bool) -> String {
+    let body = if code == 200 {
+        r#"{"exit":0,"desk":"123456789","stdout":"ok","tokens":[]}"#.to_string()
+    } else {
+        let kind = match code {
+            429 | 409 => "refused",
+            502 => "connection_lost",
+            _ => "unreachable",
+        };
+        let reason = reason.map(|r| format!(r#","reason":"{r}""#)).unwrap_or_default();
+        format!(r#"{{"error":{{"kind":"{kind}","message":"status {code}"{reason}}}}}"#)
+    };
+    let ra = retry_after.map(|s| format!("Retry-After: {s}\r\n")).unwrap_or_default();
+    let conn = if close { "close" } else { "keep-alive" };
+    format!("HTTP/1.1 {code} X\r\nContent-Type: application/json\r\nContent-Length: {}\r\n{ra}Connection: {conn}\r\n\r\n{body}", body.len())
+}
+
+/// A TLS listener with a self-signed certificate (one no client trusts):
+/// its URL and how many connections it accepted.
+pub async fn start_untrusted_tls() -> (String, Arc<std::sync::atomic::AtomicUsize>, JoinHandle<()>) {
+    let cert = rcgen::generate_simple_self_signed(vec!["127.0.0.1".into()]).unwrap();
+    let key = rustls::pki_types::PrivateKeyDer::Pkcs8(cert.key_pair.serialize_der().into());
+    let cfg = rustls::ServerConfig::builder_with_provider(Arc::new(rustls::crypto::ring::default_provider()))
+        .with_safe_default_protocol_versions()
+        .unwrap()
+        .with_no_client_auth()
+        .with_single_cert(vec![rustls::pki_types::CertificateDer::from(cert.cert.der().to_vec())], key)
+        .unwrap();
+    let acceptor = tokio_rustls::TlsAcceptor::from(Arc::new(cfg));
+    let l = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("https://{}/v1", l.local_addr().unwrap());
+    let n = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let count = n.clone();
+    let task = tokio::spawn(async move {
+        while let Ok((s, _)) = l.accept().await {
+            count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let a = acceptor.clone();
+            tokio::spawn(async move {
+                let _ = a.accept(s).await;
+            });
+        }
+    });
+    (url, n, task)
 }
 
 /// The stalled modes' partial answers (nothing for Silent).

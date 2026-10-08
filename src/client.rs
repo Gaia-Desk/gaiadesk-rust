@@ -13,7 +13,8 @@ use crate::desk::Desk;
 use crate::e2e::desk_key;
 use crate::e2e::layer::{E2eLayer, E2eMode, WarningHandler};
 use crate::error::{Error, Result};
-use crate::http::{enc, parse, CallOptions, Credentials, Http, Req, RetryPolicy, Transport};
+use crate::http::{enc, parse, CallOptions, Credentials, Http, Req, Transport};
+use crate::retry::RetryPolicy;
 use crate::timeouts::Timeouts;
 use crate::types::{
     AuditEvent, AuditList, AuditQuery, DeskList, MintResult, MintSpec, SupportSession, SupportSessionCreate, SupportSessionCreated,

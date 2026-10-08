@@ -2,6 +2,7 @@
 //! hosted API's E2E layer says so; an HTTP failure as the typed error of its
 //! envelope; retries with backoff; timeouts.
 
+use std::sync::Arc;
 use std::time::Duration;
 
 use percent_encoding::{utf8_percent_encode, AsciiSet, NON_ALPHANUMERIC};
@@ -14,6 +15,7 @@ use crate::e2e::layer::E2eLayer;
 use crate::e2e::open::{open_answer, open_error_envelope, seal_upload};
 use crate::e2e::{CallerSeal, SealedRequest, E2E_FRAMES_CONTENT_TYPE, E2E_HEADER};
 use crate::error::{desk_op_exit, error_envelope, Error, ErrorDetails, ErrorKind, Result};
+use crate::retry::{NeverSent, RetryPolicy};
 use crate::timeouts::Timeouts;
 
 /// `encodeURIComponent`'s set: everything but `A-Z a-z 0-9 - _ . ! ~ * ' ( )`.
@@ -46,63 +48,6 @@ impl Transport {
         }
     }
 }
-
-/// When and how often a failed request is tried again.
-///
-/// Retried: a 429 (over the rate limit, or a busy desk: refused before
-/// anything ran) for every operation, waiting its `Retry-After` when it is at
-/// most `max_delay`; and, for `GET` only, a connection that failed or was
-/// closed or reset before any answer (kind `network`) and a 502, 503 or 504.
-/// An operation that changes something is never sent again after it may have
-/// reached the server; a [`Timeouts`](crate::Timeouts) timeout is never
-/// retried. A sealed operation is sealed afresh for each try. Streams are
-/// retried only before they start.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RetryPolicy {
-    /// Tries after the first (0: never retry).
-    pub max_retries: u32,
-    /// The first backoff; it doubles each try (with jitter).
-    pub initial_delay: Duration,
-    /// The longest wait between tries; a `Retry-After` beyond it is not waited for.
-    pub max_delay: Duration,
-}
-
-impl Default for RetryPolicy {
-    fn default() -> Self {
-        RetryPolicy { max_retries: 2, initial_delay: Duration::from_millis(500), max_delay: Duration::from_secs(30) }
-    }
-}
-
-impl RetryPolicy {
-    /// Never retry.
-    pub fn none() -> RetryPolicy {
-        RetryPolicy { max_retries: 0, ..RetryPolicy::default() }
-    }
-
-    /// How long to wait before try `attempt + 1`, or `None` not to retry.
-    fn delay(&self, err: &Error, method: &Method, attempt: u32) -> Option<Duration> {
-        if attempt >= self.max_retries {
-            return None;
-        }
-        let get = *method == Method::GET;
-        let lost = matches!(err, Error::Unreachable(_)) && err.status().is_none() && *err.kind() == ErrorKind::Network;
-        let unavailable = err.status() == Some(503) && !err.reason().is_some_and(|r| PERMANENT_UNAVAILABLE.contains(&r));
-        let retry = err.status() == Some(429) || (get && (lost || unavailable || matches!(err.status(), Some(502 | 504))));
-        if !retry {
-            return None;
-        }
-        if let Some(s) = err.retry_after() {
-            let d = Duration::from_secs(s);
-            return (d <= self.max_delay).then_some(d);
-        }
-        let base = self.initial_delay.saturating_mul(1u32 << attempt.min(16)).min(self.max_delay);
-        let jitter = f64::from(crate::e2e::random::<1>()[0]) / 255.0;
-        Some(base.mul_f64(0.5 + jitter / 2.0))
-    }
-}
-
-/// 503 reasons that will not change on their own: not retried.
-const PERMANENT_UNAVAILABLE: [&str; 3] = ["api_disabled", "desk_ops_disabled", "local_api_off"];
 
 /// Per call: a desk token for this call only, a wake, an idempotency key, a timeout.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -154,6 +99,8 @@ pub(crate) struct Req {
     pub accept: Option<&'static str>,
     pub call: CallOptions,
     pub e2e: Option<E2eOp>,
+    /// Set when the last send of this request never made its connection.
+    pub never_sent: Arc<NeverSent>,
 }
 
 impl Req {
@@ -224,12 +171,13 @@ impl Http {
     pub async fn request(&self, method: Method, path: &str, req: &Req) -> Result<Answer> {
         let mut attempt = 0;
         loop {
+            req.never_sent.set(false);
             let r = match (&self.e2e, &req.e2e) {
                 (Some(layer), Some(op)) => layer.call(self, &method, path, req, op).await,
                 _ => self.send(&method, path, req, None).await,
             };
             match r {
-                Err(e) => match self.retry.delay(&e, &method, attempt) {
+                Err(e) => match self.retry.delay(&e, &method, attempt, req.never_sent.get()) {
                     Some(d) => {
                         tokio::time::sleep(d).await;
                         attempt += 1;
@@ -342,7 +290,7 @@ impl Http {
         }
         // The answer must begin within response_timeout (sending the request included); its
         // body is then read under idle_timeout, so a peer that goes silent is an error, never a hang.
-        let resp = self.send_within(rb, &op).await?;
+        let resp = self.send_within(rb, &op, &req.never_sent).await?;
         if !resp.status().is_success() {
             return Err(self.api_error(resp, &op, seal).await);
         }
@@ -363,6 +311,12 @@ impl Http {
                 .reason("timeout")
                 .exit(255)
                 .op(op);
+            return Error::Unreachable(Box::new(d));
+        }
+        if e.is_connect() && crate::retry::handshake_rejected(e) {
+            // A certificate the TLS handshake rejected: permanent, not a network failure (never retried).
+            let d =
+                ErrorDetails::new(ErrorKind::Unreachable, format!("{} could not be reached securely: {why}", self.where_)).exit(255).op(op);
             return Error::Unreachable(Box::new(d));
         }
         if e.is_connect() || e.is_builder() {
@@ -522,56 +476,5 @@ mod tests {
         assert!(matches!(e, Error::Protocol(_)));
         assert_eq!(e.request_id(), Some("req_h"));
         assert_eq!(e.json(), Some(&json!("<html>")));
-    }
-
-    #[test]
-    fn retry_decisions() {
-        let p = RetryPolicy::default();
-        let limited = api_error_of(
-            StatusCode::TOO_MANY_REQUESTS,
-            Some(json!({"error": {"kind": "refused", "reason": "rate_limited"}})),
-            "",
-            None,
-            Some(2),
-            "x",
-        );
-        assert_eq!(p.delay(&limited, &Method::POST, 0), Some(Duration::from_secs(2)));
-        assert_eq!(p.delay(&limited, &Method::POST, 2), None);
-        let far = api_error_of(StatusCode::TOO_MANY_REQUESTS, Some(json!({"error": {"kind": "refused"}})), "", None, Some(3600), "x");
-        assert_eq!(p.delay(&far, &Method::GET, 0), None);
-        let bad_gateway = api_error_of(StatusCode::BAD_GATEWAY, Some(json!({"error": {"kind": "connection_lost"}})), "", None, None, "x");
-        assert!(p.delay(&bad_gateway, &Method::GET, 0).is_some());
-        assert_eq!(p.delay(&bad_gateway, &Method::POST, 0), None);
-        let refused = api_error_of(StatusCode::FORBIDDEN, Some(json!({"error": {"kind": "refused"}})), "", None, None, "x");
-        assert_eq!(p.delay(&refused, &Method::GET, 0), None);
-        let d = p.delay(&bad_gateway, &Method::GET, 1).unwrap();
-        assert!(d >= Duration::from_millis(500) && d <= Duration::from_millis(1000), "{d:?}");
-        assert_eq!(RetryPolicy::none().delay(&limited, &Method::GET, 0), None);
-        // Closed or reset before any answer: reads again, never a request that may have changed something.
-        let lost = Error::Unreachable(Box::new(ErrorDetails::new(ErrorKind::Network, "closed").reason("network")));
-        assert!(p.delay(&lost, &Method::GET, 0).is_some());
-        for m in [Method::POST, Method::PUT, Method::DELETE] {
-            assert_eq!(p.delay(&lost, &m, 0), None);
-        }
-        // Timeouts (the answer never began, or stopped mid-body) are never retried.
-        let silent = Error::Unreachable(Box::new(ErrorDetails::new(ErrorKind::Timeout, "silent").reason("timeout")));
-        let stalled = Error::ConnectionLost(Box::new(ErrorDetails::new(ErrorKind::Timeout, "stalled").reason("timeout")));
-        let broke = Error::ConnectionLost(Box::new(ErrorDetails::new(ErrorKind::ConnectionLost, "broke").reason("network")));
-        for e in [&silent, &stalled, &broke] {
-            assert_eq!(p.delay(e, &Method::GET, 0), None);
-        }
-        // A 503 for reads, unless it is one that stays.
-        let busy = api_error_of(StatusCode::SERVICE_UNAVAILABLE, Some(json!({"error": {"kind": "unreachable"}})), "", None, None, "x");
-        assert!(p.delay(&busy, &Method::GET, 0).is_some());
-        assert_eq!(p.delay(&busy, &Method::POST, 0), None);
-        let off = api_error_of(
-            StatusCode::SERVICE_UNAVAILABLE,
-            Some(json!({"error": {"kind": "refused", "reason": "local_api_off"}})),
-            "",
-            None,
-            None,
-            "x",
-        );
-        assert_eq!(p.delay(&off, &Method::GET, 0), None);
     }
 }
