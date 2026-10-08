@@ -10,6 +10,7 @@
 use std::collections::VecDeque;
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::Arc;
 use std::task::{Context, Poll};
 
 use bytes::Bytes;
@@ -19,7 +20,7 @@ use serde_json::Value;
 
 use crate::e2e::open::{StreamKind, Unsealer};
 use crate::error::{desk_op_exit, Error, ErrorDetails, ErrorKind, ErrorObject, Result};
-use crate::http::{parse, Answer};
+use crate::http::{parse, Answer, Http};
 use crate::sse::SseParser;
 use crate::types::{ExecExit, Job};
 
@@ -80,6 +81,7 @@ struct State<T> {
     kind: StreamKind,
     op: String,
     map: fn(&str, Value, &str) -> Step<T>,
+    http: Arc<Http>,
 }
 
 impl<T: Send + 'static> State<T> {
@@ -140,7 +142,15 @@ impl<T: Send + 'static> State<T> {
                 continue;
             }
             let body = self.body.as_mut()?;
-            match body.next().await {
+            // Every read waits at most idle_timeout (the API sends a keep-alive every 15 s).
+            let next = match self.http.idle(body.next(), &self.op).await {
+                Ok(n) => n,
+                Err(e) => {
+                    self.finish(Err(e)); // drops the body: its connection is closed, not pooled
+                    continue;
+                }
+            };
+            match next {
                 Some(Ok(chunk)) => {
                     for ev in self.parser.feed(&chunk) {
                         self.event(ev);
@@ -167,6 +177,7 @@ impl<T: Send + 'static> State<T> {
 }
 
 fn events<T: Send + 'static>(
+    http: Arc<Http>,
     start: StartFuture,
     kind: StreamKind,
     op: String,
@@ -182,6 +193,7 @@ fn events<T: Send + 'static>(
         kind,
         op,
         map,
+        http,
     };
     Box::pin(futures_util::stream::unfold(st, State::next))
 }
@@ -251,8 +263,8 @@ pub struct ExecStream {
 }
 
 impl ExecStream {
-    pub(crate) fn new(start: StartFuture, op: String) -> ExecStream {
-        ExecStream { inner: events(start, StreamKind::Exec, op.clone(), exec_step), op }
+    pub(crate) fn new(http: Arc<Http>, start: StartFuture, op: String) -> ExecStream {
+        ExecStream { inner: events(http, start, StreamKind::Exec, op.clone(), exec_step), op }
     }
 
     /// The request (`POST /desks/123456789/exec`).
@@ -308,8 +320,8 @@ pub struct LogStream {
 }
 
 impl LogStream {
-    pub(crate) fn new(start: StartFuture, op: String) -> LogStream {
-        LogStream { inner: events(start, StreamKind::Logs, op.clone(), log_step), op }
+    pub(crate) fn new(http: Arc<Http>, start: StartFuture, op: String) -> LogStream {
+        LogStream { inner: events(http, start, StreamKind::Logs, op.clone(), log_step), op }
     }
 
     /// The request.

@@ -63,6 +63,7 @@ mod lan;
 pub mod local;
 mod sse;
 mod stream;
+mod timeouts;
 pub mod types;
 pub mod webhook;
 
@@ -77,9 +78,10 @@ pub use http::{CallOptions, RetryPolicy, Transport};
 #[cfg(feature = "lan")]
 pub use lan::normalize_fingerprint;
 pub use stream::{ExecEvent, ExecOutput, ExecStream, LogEvent, LogStream};
+pub use timeouts::{Timeouts, DEFAULT_IDLE_TIMEOUT, DEFAULT_RESPONSE_TIMEOUT};
 pub use types::*;
 
-/// The README's examples, compiled as doctests.
-#[cfg(doctest)]
+/// The README's examples, compiled as doctests (they use every transport and the blocking client).
+#[cfg(all(doctest, feature = "local", feature = "lan", feature = "blocking"))]
 #[doc = include_str!("../README.md")]
 struct ReadmeDoctests;

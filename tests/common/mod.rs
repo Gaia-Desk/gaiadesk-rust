@@ -9,6 +9,7 @@
 #![allow(dead_code)]
 
 pub mod desk;
+pub mod raw;
 
 use std::collections::{HashMap, VecDeque};
 use std::convert::Infallible;

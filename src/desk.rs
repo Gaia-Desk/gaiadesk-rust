@@ -210,7 +210,7 @@ impl Desk {
             self.client.req().query("stream", 1).json(s.clone()).e2e(&d, "exec", json!({"op": "exec", "spec": s, "stream": true}));
         req.accept = Some("text/event-stream");
         let op = format!("POST {p}");
-        Ok(ExecStream::new(self.start(Method::POST, p, req), op))
+        Ok(ExecStream::new(self.client.http.clone(), self.start(Method::POST, p, req), op))
     }
 
     // ───────────────────────────── files ─────────────────────────────
@@ -266,17 +266,8 @@ impl Desk {
         let mut a = self.http().timed(req.call.timeout, self.http().request(Method::GET, &p, &req), &op).await?;
         let mut opener = a.seal.take().map(|s| DownloadOpener::new(s, &op));
         let mut n = 0u64;
-        loop {
-            let chunk = match a.resp.chunk().await {
-                Ok(Some(c)) => c,
-                Ok(None) => break,
-                Err(e) => {
-                    let msg = format!("the download broke: {}", crate::http::chain(&e));
-                    return Err(Error::ConnectionLost(Box::new(
-                        ErrorDetails::new(ErrorKind::ConnectionLost, msg).reason("network").exit(255).op(&op),
-                    )));
-                }
-            };
+        // Each read waits at most idle_timeout; a download that keeps flowing never times out.
+        while let Some(chunk) = self.http().chunk(&mut a.resp, &op).await? {
             match opener.as_mut() {
                 Some(o) => {
                     for b in o.feed(&chunk)? {
@@ -406,7 +397,7 @@ impl Desk {
         let mut req = req.e2e(&d, "job_logs", r);
         req.accept = Some("text/event-stream");
         let op = format!("GET {p}");
-        Ok(LogStream::new(self.start(Method::GET, p, req), op))
+        Ok(LogStream::new(self.client.http.clone(), self.start(Method::GET, p, req), op))
     }
 
     /// `GET /desks/{id}/jobs/{name}/wait`: wait until the job is no longer

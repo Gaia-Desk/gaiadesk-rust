@@ -14,6 +14,7 @@ use crate::e2e::desk_key;
 use crate::e2e::layer::{E2eLayer, E2eMode, WarningHandler};
 use crate::error::{Error, Result};
 use crate::http::{enc, parse, CallOptions, Credentials, Http, Req, RetryPolicy, Transport};
+use crate::timeouts::Timeouts;
 use crate::types::{
     AuditEvent, AuditList, AuditQuery, DeskList, MintResult, MintSpec, SupportSession, SupportSessionCreate, SupportSessionCreated,
     SupportSessionList, Webhook, WebhookCreate, WebhookCreated, WebhookDeleted, WebhookList,
@@ -343,6 +344,7 @@ pub struct ClientBuilder {
     timeout: Option<Duration>,
     connect_timeout: Duration,
     retry: RetryPolicy,
+    timeouts: Timeouts,
     #[cfg(feature = "local")]
     local: crate::local::LocalOptions,
     #[cfg(feature = "lan")]
@@ -383,6 +385,7 @@ impl ClientBuilder {
             timeout: Some(DEFAULT_TIMEOUT),
             connect_timeout: Duration::from_secs(30),
             retry: RetryPolicy::default(),
+            timeouts: Timeouts::default(),
             #[cfg(feature = "local")]
             local: crate::local::LocalOptions::default(),
             #[cfg(feature = "lan")]
@@ -450,6 +453,14 @@ impl ClientBuilder {
         self
     }
 
+    /// How long to wait for an answer to begin and for each read of its body
+    /// (default [`Timeouts::default`]: 16 minutes and 90 s), so a peer that
+    /// drops or stalls a connection is an error, never a hang.
+    pub fn timeouts(mut self, timeouts: Timeouts) -> Self {
+        self.timeouts = timeouts;
+        self
+    }
+
     /// The desk's own local API (code running on the desk), over its Unix
     /// socket (`$GAIADESK_API_DIR/api.sock`, else `~/.gaiadesk/api.sock`) or
     /// Windows named pipe (`$GAIADESK_API_PIPE`, else
@@ -499,6 +510,7 @@ impl ClientBuilder {
     /// Check the options and build the client.
     pub fn build(self) -> Result<Client> {
         let desk_token = non_empty(self.desk_token, "desk_token (a scoped agent token, gdagt_…)")?;
+        self.timeouts.check()?;
         let hosted_only = |what: &str| Error::usage(format!("{what} is for the hosted API transport only"));
         if self.transport != Transport::Api {
             if self.api_key.is_some() {
@@ -541,6 +553,7 @@ impl ClientBuilder {
                     creds,
                     retry: self.retry,
                     timeout: self.timeout,
+                    timeouts: self.timeouts,
                     e2e: None,
                     pin: Some(pin),
                 };
@@ -569,6 +582,7 @@ impl ClientBuilder {
             creds,
             retry: self.retry,
             timeout: self.timeout,
+            timeouts: self.timeouts,
             e2e,
             #[cfg(feature = "lan")]
             pin: None,
@@ -600,6 +614,22 @@ mod tests {
         assert_eq!(c.base_url(), "http://127.0.0.1:9/v1");
         assert_eq!(c.transport(), Transport::Api);
         assert_eq!(Client::new("ak_1").unwrap().base_url(), DEFAULT_API_URL);
+    }
+
+    #[test]
+    fn timeouts_are_checked() {
+        let with = |t: Timeouts| Client::builder().api_key("ak_1").timeouts(t).build();
+        let zero = Some(Duration::ZERO);
+        assert!(matches!(with(Timeouts { idle_timeout: zero, ..Timeouts::default() }), Err(Error::Usage(_))));
+        assert!(matches!(with(Timeouts { response_timeout: zero, ..Timeouts::default() }), Err(Error::Usage(_))));
+        assert_eq!(with(Timeouts::none()).unwrap().http.timeouts, Timeouts::none());
+        let d = Client::new("ak_1").unwrap().http.timeouts;
+        assert_eq!((d.response_timeout, d.idle_timeout), (Some(Duration::from_secs(960)), Some(Duration::from_secs(90))));
+        #[cfg(feature = "local")]
+        assert!(matches!(
+            Client::builder().local().admin_token("gdlocal_t").timeouts(Timeouts { idle_timeout: zero, ..Timeouts::default() }).build(),
+            Err(Error::Usage(_))
+        ));
     }
 
     #[cfg(feature = "local")]

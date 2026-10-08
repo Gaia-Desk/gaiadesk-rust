@@ -386,13 +386,32 @@ SDK's kinds, so `offline` stays `offline`). `exit_code()` is what
 
 - **Retries** (`RetryPolicy`, default 2 retries, 500 ms doubling with jitter,
   at most 30 s): a 429 (rate limited or a busy desk: refused before anything
-  ran), honouring `Retry-After`; a connection that could not be made; and for
-  `GET`s only a 502/504 or a connection lost mid-answer. A sealed operation is
-  sealed afresh for each try. `RetryPolicy::none()` turns them off.
-- **Timeouts**: `ClientBuilder::timeout` (default 16 minutes, above the
-  API's 15-minute cap) for each call; a stream or a download is timed until it
-  starts. `connect_timeout` defaults to 30 s. Per call: `with_timeout`.
-  `wait_job` and `wake` stretch the timeout to cover the wait they ask for.
+  ran) for every operation, honouring `Retry-After`; and for `GET`s only a
+  connection that failed or was closed or reset before any answer, and a
+  502/503/504. A sealed operation is sealed afresh for each try. Operations
+  that change something are never sent twice after they may have run.
+  `RetryPolicy::none()` turns them off.
+- **Timeouts** (`Timeouts`, `ClientBuilder::timeouts`) make a server or proxy
+  that stops answering an error, never a hang, on every transport:
+  - `response_timeout` (default 16 minutes, above the API's 15-minute call
+    limit): the longest wait for an answer to begin, sending the request
+    included. Exceeded: `Error::Unreachable`, kind `timeout`; not retried.
+  - `idle_timeout` (default 90 s; streams and held waits send a keep-alive
+    every 15 s): the longest silence while reading a body (JSON, a download,
+    an event stream), per read, so a download that keeps flowing never times
+    out. Exceeded mid-answer: `Error::ConnectionLost`, kind `timeout` (a
+    stream ends with that error as its last item); not retried, and a
+    download to a file leaves nothing behind.
+  - `None` is no limit (`Timeouts::none()`); zero is a usage error.
+  - A connection closed or reset before any answer is an `Error::Unreachable`
+    (kind `network`) at once. The HTTP stack (hyper-util's pool, under
+    reqwest) re-sends a request by itself only when it never wrote it (the
+    pooled connection closed first), so `exec`, uploads, jobs, tokens and
+    wakes reach the server at most once unless the SDK's own policy allows.
+- **Call timeout**: `ClientBuilder::timeout` (default 16 minutes) for each
+  whole call; a stream or a download is timed until it starts.
+  `connect_timeout` defaults to 30 s. Per call: `with_timeout`. `wait_job`
+  and `wake` stretch it to cover the wait they ask for.
 - **Idempotency**: `with_idempotency_key("…")` sends `Idempotency-Key` on POSTs
   (a retry with the same key and request within 24 hours replays the first
   answer). Use one key per logical request.

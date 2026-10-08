@@ -4,6 +4,33 @@ All notable changes to this crate are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the crate follows
 [Semantic Versioning](https://semver.org/).
 
+## [0.1.1] - 2026-10-08
+
+### Fixed
+
+- Never hang on a dropped or stalled connection. A server or proxy that
+  stalled mid-body (a download, an event stream from `exec_stream` or
+  `follow_job_logs`) was waited for forever, and one that stalled mid-JSON or
+  never answered was waited for until the 16-minute call timeout. New
+  `Timeouts` (`ClientBuilder::timeouts`, every transport: API, local, LAN):
+  `response_timeout` (16 min) bounds the wait for an answer to begin, the
+  request's body included (`Error::Unreachable`, kind `timeout`);
+  `idle_timeout` (90 s) bounds every read of a body: JSON, error bodies,
+  plain and sealed downloads, event streams (`Error::ConnectionLost`, kind
+  `timeout`). Neither is retried; the connection is closed, not pooled.
+- A connection closed or reset before any answer is now `Error::Unreachable`
+  (kind `network`, reason `network`), as in the other SDKs (it was
+  `ConnectionLost`), and is retried for `GET`s only: a request that changes
+  something (exec, upload, jobs, tokens, wake) is sent once. A connection
+  that could not be made is likewise retried for reads only. A 503 is
+  retried for reads, unless its reason does not change on its own
+  (`api_disabled`, `desk_ops_disabled`, `local_api_off`).
+- Proven on a raw-socket test server: closed or reset before any response
+  byte (with and without reading a 4 MiB upload), stalled mid-body, mid-JSON
+  and mid-stream, silent, and a 300-request stress run.
+- The README's doctests compile only with every feature on, so
+  `cargo test --no-default-features` passes.
+
 ## [0.1.0] - 2026-10-08
 
 The first release: the hosted GaiaDesk Platform API (`/v1`) from Rust, at

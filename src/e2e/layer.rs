@@ -79,7 +79,7 @@ impl E2eLayer {
         };
         let path = format!("/desks/{}", enc(desk));
         let d = match http.send(&Method::GET, &path, &lookup, None).await {
-            Ok(a) => a.resp.text().await.ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or(Value::Null),
+            Ok(a) => http.text(a.resp, &a.op).await.ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or(Value::Null),
             Err(e @ Error::Interrupted(_)) => return Err(e),
             Err(e) => {
                 return Ok(KeyInfo { key: None, required: false, why: format!("its key could not be read (GET /desks/{desk}: {e})") })
