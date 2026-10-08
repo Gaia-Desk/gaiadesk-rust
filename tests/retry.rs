@@ -49,15 +49,32 @@ async fn exec(c: &Client) -> Result<ExecResult> {
 async fn a_connection_never_made_is_retried_for_any_method_and_the_post_arrives_once() {
     // Refused until the server appears 100 ms later: the POST goes when it can, once.
     let s = RawServer::start_after(RawMode::Status(200, None, None), Duration::from_millis(100)).await;
-    let c = client(&s.url, 5, Duration::from_millis(50)); // backoff at least 25+50+100+200 ms
+    // Backoff at least 25+50+100+200 ms; a response timeout that outlasts a Windows refused connect (~2 s).
+    let c = Client::builder()
+        .api_key("ak_t")
+        .base_url(&s.url)
+        .e2e(E2eMode::Off)
+        .retry(RetryPolicy { max_retries: 5, initial_delay: Duration::from_millis(50), ..RetryPolicy::default() })
+        .timeouts(Timeouts { response_timeout: Some(Duration::from_secs(8)), ..Timeouts::default() })
+        .build()
+        .unwrap();
     let r = bounded(exec(&c)).await.unwrap();
     assert_eq!(r.stdout, "ok");
     assert_eq!(s.count("POST"), 1);
-    // Retries off: unreachable at once.
+    // Retries off: unreachable, one connect attempt. (Windows answers a closed port only after its
+    // own SYN retries, about 2 s, so the response timeout here outlasts that.)
     let never = RawServer::start_after(RawMode::Status(200, None, None), Duration::from_secs(3600)).await;
+    let patient = Client::builder()
+        .api_key("ak_t")
+        .base_url(&never.url)
+        .e2e(E2eMode::Off)
+        .retry(RetryPolicy::none())
+        .timeouts(Timeouts { response_timeout: Some(Duration::from_secs(8)), ..Timeouts::default() })
+        .build()
+        .unwrap();
     let t = Instant::now();
-    network(&fails(exec(&client(&never.url, 0, Duration::from_millis(5)))).await);
-    assert!(t.elapsed() < Duration::from_secs(1));
+    network(&fails(exec(&patient)).await);
+    assert!(t.elapsed() < Duration::from_secs(5), "{:?}", t.elapsed());
 }
 
 #[tokio::test]
