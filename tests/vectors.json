@@ -1,0 +1,49 @@
+{
+  "aad_event_1_hex": "676169616465736b2d6532652f7631206576656e74003438313930323737340065786563000000000000000001",
+  "aad_request_hex": "676169616465736b2d6532652f76312072657175657374003438313930323737340065786563",
+  "about": "GaiaDesk end-to-end desk operations, v1: X25519 + HKDF-SHA256 + XChaCha20-Poly1305 (protocol/src/e2e.rs). Binary fields base64url without padding; secrets hex.",
+  "desk_id": "481902774",
+  "desk_pub": "B6N8vBQgk8i3VdwbEOhstCY3StFqqFPtC9_AsrhtHHw",
+  "desk_secret_hex": "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20",
+  "eph_secret_hex": "a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf",
+  "events": [
+    {
+      "ciphertext": "kK43H-HYOJQsSytzJ4T6siyLjWHZQDvdaegjAfPXnbxxiJzxLK2wv-I49oJhi_c89J8VN9dcNDU",
+      "nonce": "MDEyMzQ1Njc4OTo7PD0-P0BBQkNERUZH",
+      "plaintext": "{\"event\":\"stdout\",\"data\":\"dmVjdG9yCg==\"}",
+      "seq": 0
+    },
+    {
+      "ciphertext": "frWbCHGGYWCz74MotVGmJNKB_psHdJKTI9YV2MPaAXBLNvgrnaQRNcLJeg7EL5GTaFTZvQ",
+      "nonce": "SElKS0xNTk9QUVJTVFVWV1hZWltcXV5f",
+      "plaintext": "{\"event\":\"exit\",\"result\":{\"exit\":0}}",
+      "seq": 1
+    }
+  ],
+  "hkdf_salt": "gaiadesk desk-op e2e v1",
+  "inputs": [
+    {
+      "ciphertext": "4oCKnF4rCPbVNjDiuk3Gph9-Veb7tAg",
+      "data": "hello ",
+      "last": false,
+      "nonce": "cHFyc3R1dnd4eXp7fH1-f4CBgoOEhYaH",
+      "seq": 0
+    },
+    {
+      "ciphertext": "TuBJY7ZvlR8rnk7LVTA4MoBCL_AYxQ",
+      "data": "world",
+      "last": true,
+      "nonce": "iImKi4yNjo-QkZKTlJWWl5iZmpucnZ6f",
+      "seq": 1
+    }
+  ],
+  "op": "exec",
+  "request": {
+    "ciphertext": "_LBvUdWri7eIvm_bgXrz5mQd76u7skcu7RiEOUlm9U1RldVTbcG2cfc5516DY2CRkZza9K1_CD9oJVZIXe7mS_XZPHKulKcj4aZWTrkk0xE-8xBKHHzntpiZh26Vcylw",
+    "nonce": "EBESExQVFhcYGRobHB0eHyAhIiMkJSYn",
+    "pub": "YFpyXSpK3-6xop4X7dYhwbdZPujNvESsbEq24vgF0jw",
+    "v": 1
+  },
+  "request_header": "eyJ2IjoxLCJwdWIiOiJZRnB5WFNwSzMtNnhvcDRYN2RZaHdiZFpQdWpOdkVTc2JFcTI0dmdGMGp3Iiwibm9uY2UiOiJFQkVTRXhRVkZoY1lHUm9iSEIwZUh5QWhJaU1rSlNZbiIsImNpcGhlcnRleHQiOiJfTEJ2VWRXcmk3ZUl2bV9iZ1hyejVtUWQ3NnU3c2tjdTdSaUVPVWxtOVUxUmxkVlRiY0cyY2ZjNTUxNkRZMkNSa1p6YTlLMV9DRDlvSlZaSVhlN21TX1haUEhLdWxLY2o0YVpXVHJrazB4RS04eEJLSEh6bnRwaVpoMjZWY3lsdyJ9",
+  "request_plaintext": "{\"v\":1,\"ts\":1791000000,\"request\":{\"op\":\"exec\",\"spec\":{\"command\":\"echo vector\"}}}"
+}
