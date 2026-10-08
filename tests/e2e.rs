@@ -123,8 +123,8 @@ async fn desk_errors_open_to_the_desks_own_message_same_class_kind_reason_status
     let e = c.desk(DESK).job_logs("missing", None).await.unwrap_err();
     assert!(matches!(e, Error::Failed(_)));
     assert_eq!(e.message(), "no job named \"missing\"");
-    let e = c.desk(DESK).exec(ExecSpec::command("id").as_admin()).await.unwrap_err();
-    assert!(e.is_admin_refusal());
+    let e = c.desk(DESK).exec(ExecSpec::command("as-admin")).await.unwrap_err();
+    assert!(matches!(e, Error::Refused(_)) && e.reason() == Some(reasons::ADMIN_NOT_VIA_API), "{e:?}");
 }
 
 #[tokio::test]

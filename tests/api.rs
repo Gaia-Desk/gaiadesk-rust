@@ -107,14 +107,22 @@ async fn exec_sends_an_exec_spec_and_reads_the_result() {
 }
 
 #[tokio::test]
-async fn admin_exec_refusals_are_typed() {
+async fn administrator_work_is_refused_admin_not_via_api() {
     let (m, c) = client(vec![(DESK, MockDesk::plain())]).await;
-    let e = c.desk(DESK).exec(ExecSpec::command("id").as_admin()).await.unwrap_err();
-    assert_eq!(serde_json::from_slice::<Value>(&m.last().body).unwrap()["admin"], json!(true));
+    // An exec the API refuses before anything runs (200, exit 254): its typed refusal.
+    let e = c.desk(DESK).exec(ExecSpec::command("as-admin")).await.unwrap_err();
+    assert!(serde_json::from_slice::<Value>(&m.last().body).unwrap().get("admin").is_none(), "the SDK never sends admin");
     assert!(matches!(e, Error::Refused(_)));
-    assert!(e.is_admin_refusal());
-    assert_eq!(e.reason(), Some(reasons::ADMIN_DENIED));
-    assert_eq!(e.exit_code(), Some(254));
+    assert_eq!((e.kind(), e.reason(), e.exit_code()), (&ErrorKind::Refused, Some(reasons::ADMIN_NOT_VIA_API), Some(254)));
+    // The same answer streamed: the stream's one item is that refusal.
+    let mut s = c.desk(DESK).exec_stream(ExecSpec::command("as-admin")).unwrap();
+    let e = s.next().await.unwrap().unwrap_err();
+    assert!(matches!(e, Error::Refused(_)) && e.reason() == Some(reasons::ADMIN_NOT_VIA_API), "{e:?}");
+    assert!(s.next().await.is_none());
+    // Minting the admin scope: 403 refused.
+    let e = c.desk(DESK).mint_token(&MintSpec::new("root").scopes([scopes::EXEC, "admin"])).await.unwrap_err();
+    assert!(matches!(e, Error::Refused(_)));
+    assert_eq!((e.status(), e.kind(), e.reason()), (Some(403), &ErrorKind::Refused, Some(reasons::ADMIN_NOT_VIA_API)));
     // A desk's refusal before running is the HTTP error.
     let e = c.desk(DESK).exec(ExecSpec::command("refuse")).await.unwrap_err();
     assert!(matches!(e, Error::Refused(_)));
@@ -263,13 +271,13 @@ async fn files_raw_bytes_up_and_down() {
 #[tokio::test]
 async fn tokens_mint_list_revoke_across_desks() {
     let (m, c) = client(vec![(DESK, MockDesk::plain()), ("987654321", MockDesk::plain())]).await;
-    let spec = MintSpec::new("bot").scopes([scopes::EXEC, scopes::ADMIN]).expires_in(Duration::from_secs(3600));
+    let spec = MintSpec::new("bot").scopes([scopes::EXEC, scopes::JOBS]).expires_in(Duration::from_secs(3600));
     let r = c.create_token([DESK, "987654321"], &spec).await.unwrap();
     assert_eq!(r.tokens.len(), 2);
     assert_eq!(r.tokens[0].secret, "gdagt_minted_secret");
     assert_eq!(
         serde_json::from_slice::<Value>(&m.last().body).unwrap(),
-        json!({"name": "bot", "expires_secs": 3600, "scopes": ["exec", "admin"]})
+        json!({"name": "bot", "expires_secs": 3600, "scopes": ["exec", "jobs"]})
     );
     // A later desk failing: the error carries the tokens already minted.
     let e = c.create_token([DESK, "111111111"], &spec).await.unwrap_err();

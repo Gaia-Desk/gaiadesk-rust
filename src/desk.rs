@@ -165,7 +165,7 @@ impl Desk {
 
     /// `POST /desks/{id}/exec`: run one command and wait for it: the same
     /// result as `gaiadesk-cli exec --json`, whatever its exit code. A command
-    /// that never ran (refused, unreachable, an `admin` request turned down)
+    /// that never ran (refused, unreachable)
     /// is its typed error.
     pub async fn exec(&self, spec: ExecSpec) -> Result<ExecResult> {
         spec.check()?;

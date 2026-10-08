@@ -123,11 +123,13 @@ pub fn run(desk: &str, req: &Value, input: &[u8], files: &mut HashMap<String, Ve
             if cmd == "refuse" {
                 return vec![err("refused", "token_refused", &format!("this token (bot) has no exec scope on desk {desk}"))];
             }
-            if spec["admin"] == json!(true) {
+            // What an API answers an exec with "admin": true (which the SDK cannot send).
+            if cmd == "as-admin" {
                 return vec![exit(
                     json!({"desk": desk, "exit": 254, "remote_code": null, "duration_ms": 0, "notes": [], "stdout": "", "stderr": "",
                     "timed_out": false, "truncated": false,
-                    "error": {"kind": "refused", "reason": "admin_denied", "message": "the person at the desk said no", "desk": desk}}),
+                    "error": {"kind": "refused", "reason": "admin_not_via_api",
+                        "message": "administrator work is not available through the API: use gaiadesk-cli exec --admin", "desk": desk}}),
                 )];
             }
             let mut text = format!("ran: {cmd} é\n");
@@ -195,6 +197,9 @@ pub fn run(desk: &str, req: &Value, input: &[u8], files: &mut HashMap<String, Ve
             let mut ev: Vec<Value> = data.chunks(48 * 1024).map(out).collect();
             ev.push(exit(json!({"direction": "download", "desk": desk, "destination": s("path"), "files": 1, "bytes": data.len()})));
             ev
+        }
+        "token_mint" if req["spec"]["scopes"].as_array().is_some_and(|a| a.contains(&json!("admin"))) => {
+            vec![err("refused", "admin_not_via_api", "the admin scope cannot be minted through the API: use gaiadesk-cli token create")]
         }
         "token_mint" => vec![exit(json!({"tokens": [{"desk": desk, "secret": "gdagt_minted_secret",
             "token": {"id": "tok1", "label": req["spec"]["name"], "issued_at_ms": 1, "expires_at_ms": 2, "scopes": req["spec"]["scopes"]}}]}))],

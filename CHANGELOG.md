@@ -4,6 +4,30 @@ All notable changes to this crate are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the crate follows
 [Semantic Versioning](https://semver.org/).
 
+## [0.1.2] - 2026-10-08
+
+### Removed (breaking)
+
+- Administrator work is not available over any API (hosted, local or LAN):
+  the API refuses an exec with `"admin": true` (exit 254) and minting the
+  `admin` scope (403), both with `admin_not_via_api`. Removed with no
+  replacement: `ExecSpec::admin` and `ExecSpec::as_admin`, `scopes::ADMIN`,
+  the confined-token check for it, `Error::is_admin_refusal`, and the
+  `reasons::ADMIN_SCOPE_MISSING`, `ADMIN_NOT_ENABLED`, `ADMIN_DENIED` and
+  `ADMIN_UNAVAILABLE` constants. Run administrator work with
+  `gaiadesk-cli exec --admin`.
+
+### Added
+
+- `reasons::ADMIN_NOT_VIA_API`: the refusal (`Error::Refused`, kind
+  `refused`) for administrator work asked of an API, from a refused exec
+  (buffered or streamed) or a 403 mint.
+
+### Fixed
+
+- Tests only: the connect-refused retry test allows for Windows' slower
+  refused connects (about 2 s).
+
 ## [0.1.1] - 2026-10-08
 
 ### Fixed

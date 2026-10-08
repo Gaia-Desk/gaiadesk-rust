@@ -152,8 +152,8 @@ desk.exec_checked(ExecSpec::command("make test")).await?;
 ```
 
 `exec` answers whatever the exit code (`exit`, `remote_code`, `timed_out`,
-`truncated` past 8 MB); a command that **never ran** (refused, unreachable,
-an administrator request turned down) is its typed error. Calls are held under
+`truncated` past 8 MB); a command that **never ran** (refused, unreachable)
+is its typed error. Calls are held under
 the API's 15-minute limit; start a job for longer work.
 
 **Streaming.** `exec_stream` returns an `ExecStream`, a `futures::Stream` of
@@ -164,14 +164,9 @@ the request, and the desk stops the command.** `collect_output()` reads it to
 the end. The API takes stdin up front (`ExecSpec::stdin`); it cannot be
 written to while the command runs.
 
-**As administrator.** `ExecSpec::as_admin()` sends `"admin": true`: run as
-root (macOS, Linux) or SYSTEM (Windows) in the desk's privileged GaiaDesk
-process. It needs an agent token with the `admin` scope **and** the desk
-owner's Admin access switch, turned on only at the desk. A refusal is
-`Error::Refused` with `reason` one of `reasons::ADMIN_SCOPE_MISSING`,
-`ADMIN_NOT_ENABLED`, `ADMIN_DENIED`, `ADMIN_UNAVAILABLE`
-(`err.is_admin_refusal()`); Windows Smart App Control / WDAC still refuse
-unsigned programs (`blocked_by_os_policy`).
+**Administrator work** (root / SYSTEM) is only available through
+`gaiadesk-cli exec --admin`, not the API — the API refuses it with
+`admin_not_via_api` (`Error::Refused`, `reasons::ADMIN_NOT_VIA_API`).
 
 ## Files
 
@@ -245,9 +240,8 @@ client.desk("123456789").revoke_token("ci-bot").await?;
 # Ok(()) }
 ```
 
-`scopes::ADMIN` is never implied; a confined token (`cwd`, `low_priv`) cannot
-carry it (refused before sending). If a later desk fails in `create_token`,
-the error's `json()` carries the tokens already minted.
+If a later desk fails in `create_token`, the error's `json()` carries the
+tokens already minted.
 
 ## Audit
 

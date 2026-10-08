@@ -1,6 +1,6 @@
 [package]
 name = "gaiadesk"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2021"
 rust-version = "1.88"
 description = "The official Rust SDK for the GaiaDesk Platform API: desks, exec with streamed output, files, jobs, stats, scoped tokens, webhooks and support sessions, with end-to-end encrypted desk operations."

@@ -5,7 +5,7 @@
 //! same object `gaiadesk-cli --json` prints. Its `kind` (one of six: `usage`,
 //! `refused`, `unreachable`, `connection_lost`, `failed`, `protocol`) picks the
 //! [`Error`] variant; its `reason` is the finer cause (`unknown_desk`,
-//! `rate_limited`, `desk_busy`, `e2e_required`, `admin_denied`, …).
+//! `rate_limited`, `desk_busy`, `e2e_required`, `admin_not_via_api`, …).
 //!
 //! [`Error::kind`] is the finest [`ErrorKind`] known: the envelope's `reason`
 //! when it is one of the SDK's kinds (so `offline` stays `offline`), else its
@@ -144,7 +144,7 @@ pub struct ErrorDetails {
     pub message: String,
     /// The finest kind known (see [`ErrorKind::of`]).
     pub kind: ErrorKind,
-    /// The finer cause (`unknown_desk`, `rate_limited`, `admin_denied`, …), when given.
+    /// The finer cause (`unknown_desk`, `rate_limited`, `admin_not_via_api`, …), when given.
     pub reason: Option<String>,
     /// The desk it concerned, when known.
     pub desk: Option<String>,
@@ -216,7 +216,7 @@ pub enum Error {
     Usage(Box<ErrorDetails>),
     /// The desk or the server said no (`refused`): a credential, a scope, a
     /// permission off, a rate limit (`rate_limited`), a busy desk (`desk_busy`),
-    /// an administrator request refused (`admin_*`), …
+    /// administrator work asked of the API (`admin_not_via_api`), …
     #[error("{}", .0.message)]
     Refused(Box<ErrorDetails>),
     /// End-to-end encryption: the SDK would not send the operation in the
@@ -354,12 +354,6 @@ impl Error {
         self.status() == Some(429) || matches!(self.kind(), ErrorKind::Network)
     }
 
-    /// An administrator request the desk refused (`admin_scope_missing`,
-    /// `admin_not_enabled`, `admin_denied`, `admin_unavailable`).
-    pub fn is_admin_refusal(&self) -> bool {
-        matches!(self, Error::Refused(_)) && self.reason().is_some_and(|r| r.starts_with("admin_"))
-    }
-
     /// A usage error: nothing was sent.
     pub(crate) fn usage(message: impl Into<String>) -> Error {
         Error::Usage(Box::new(ErrorDetails::new(ErrorKind::Usage, message)))
@@ -474,17 +468,12 @@ pub fn desk_op_exit(kind: &str) -> i32 {
     }
 }
 
-/// Refusal reasons for an administrator request (`exec` with `admin: true`).
+/// Refusal reasons the SDK names.
 pub mod reasons {
-    /// The token has no `admin` scope (or it is a person's call).
-    pub const ADMIN_SCOPE_MISSING: &str = "admin_scope_missing";
-    /// Admin access is off on the desk.
-    pub const ADMIN_NOT_ENABLED: &str = "admin_not_enabled";
-    /// The person at the desk said no, nobody answered or was there, or the
-    /// desk's background service does not know the token yet.
-    pub const ADMIN_DENIED: &str = "admin_denied";
-    /// The desk has no privileged process, or is too old for the field.
-    pub const ADMIN_UNAVAILABLE: &str = "admin_unavailable";
+    /// Administrator work (root / SYSTEM) asked of an API: an exec with
+    /// `"admin": true`, or minting a token with the `admin` scope. It runs
+    /// only through `gaiadesk-cli exec --admin`, never over an API.
+    pub const ADMIN_NOT_VIA_API: &str = "admin_not_via_api";
     /// Windows Smart App Control / WDAC refused the program.
     pub const BLOCKED_BY_OS_POLICY: &str = "blocked_by_os_policy";
     /// A plaintext operation on a desk that requires end-to-end encryption.
@@ -560,14 +549,11 @@ mod tests {
     }
 
     #[test]
-    fn exits_and_admin_refusals() {
+    fn exits_and_kinds() {
         assert_eq!(desk_op_exit("refused"), 254);
         assert_eq!(desk_op_exit("failed"), 1);
         assert_eq!(desk_op_exit("interrupted"), 130);
         assert_eq!(desk_op_exit("protocol"), 255);
-        let e = Error::Refused(Box::new(ErrorDetails::new(ErrorKind::Refused, "no").reason(reasons::ADMIN_DENIED)));
-        assert!(e.is_admin_refusal());
-        assert!(!Error::usage("x").is_admin_refusal());
         for k in SDK_KINDS {
             assert_eq!(ErrorKind::parse(k).as_str(), k);
         }

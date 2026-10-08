@@ -119,11 +119,6 @@ pub struct ExecSpec {
     /// Text for its stdin, then end of input (absent: stdin is closed).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stdin: Option<String>,
-    /// Run it as administrator (root / SYSTEM): needs a desk token with the
-    /// `admin` scope and the desk owner's Admin access; else refused with an
-    /// `admin_*` reason (see [`crate::reasons`]).
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub admin: bool,
 }
 
 impl ExecSpec {
@@ -186,12 +181,6 @@ impl ExecSpec {
     /// Bytes for its stdin (the API takes text: invalid UTF-8 is replaced).
     pub fn stdin_bytes(mut self, bytes: &[u8]) -> Self {
         self.stdin = Some(String::from_utf8_lossy(bytes).into_owned());
-        self
-    }
-
-    /// Run it as administrator (see [`ExecSpec::admin`](struct.ExecSpec.html#structfield.admin)).
-    pub fn as_admin(mut self) -> Self {
-        self.admin = true;
         self
     }
 
@@ -621,9 +610,6 @@ pub mod scopes {
     pub const JOBS: &str = "jobs";
     /// The screen (Agent Access).
     pub const SCREEN: &str = "screen";
-    /// Ask to run as administrator. Never implied; the desk owner's Admin
-    /// access (turned on at the desk) still decides.
-    pub const ADMIN: &str = "admin";
 }
 
 /// An agent token to mint on a desk (`POST /desks/{id}/tokens`).
@@ -692,9 +678,6 @@ impl MintSpec {
         }
         if self.expires_secs == 0 {
             return Err(Error::usage("a token must expire after more than 0 seconds"));
-        }
-        if self.scopes.iter().any(|s| s == scopes::ADMIN) && (self.cwd.is_some() || self.low_priv) {
-            return Err(Error::usage("a confined token (cwd, low_priv) cannot carry the admin scope"));
         }
         if let Some(c) = &self.cwd {
             check_cwd(c)?;
@@ -778,11 +761,10 @@ mod tests {
             .env("CI", "1")
             .cwd("src")
             .timeout(Duration::from_millis(1500))
-            .stdin("in")
-            .as_admin();
+            .stdin("in");
         assert_eq!(
             serde_json::to_value(&s).unwrap(),
-            json!({"argv": ["make", "test"], "shell": "pwsh", "env": {"CI": "1"}, "cwd": "src", "timeout_secs": 2, "stdin": "in", "admin": true})
+            json!({"argv": ["make", "test"], "shell": "pwsh", "env": {"CI": "1"}, "cwd": "src", "timeout_secs": 2, "stdin": "in"})
         );
         assert_eq!(serde_json::to_value(ExecSpec::command("uname -a")).unwrap(), json!({"command": "uname -a"}));
     }
@@ -825,12 +807,10 @@ mod tests {
     }
 
     #[test]
-    fn mint_spec_defaults_and_admin_rule() {
+    fn mint_spec_defaults() {
         let m = MintSpec::new("bot");
         assert_eq!(serde_json::to_value(&m).unwrap(), json!({"name": "bot", "expires_secs": 604800, "scopes": ["exec", "cp", "jobs"]}));
-        assert!(MintSpec::new("bot").scopes([scopes::EXEC, scopes::ADMIN]).check().is_ok());
-        assert!(MintSpec::new("bot").scopes([scopes::ADMIN]).cwd("/srv").check().is_err());
-        assert!(MintSpec::new("bot").scopes([scopes::ADMIN]).low_priv(true).check().is_err());
+        assert!(MintSpec::new("bot").scopes([scopes::EXEC, scopes::SHELL]).check().is_ok());
         assert!(MintSpec::new(" ").check().is_err());
         assert!(MintSpec::new("x").scopes(Vec::<String>::new()).check().is_err());
     }
@@ -842,7 +822,7 @@ mod tests {
         assert_eq!(r.extra["new_field"], json!(1));
         assert!(r.success());
         let never: ExecResult = serde_json::from_value(
-            json!({"exit": 254, "remote_code": null, "error": {"kind": "refused", "message": "no", "reason": "admin_denied"}}),
+            json!({"exit": 254, "remote_code": null, "error": {"kind": "refused", "message": "no", "reason": "admin_not_via_api"}}),
         )
         .unwrap();
         assert!(never.never_ran());
