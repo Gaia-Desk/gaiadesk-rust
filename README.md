@@ -1,15 +1,21 @@
 # GaiaDesk SDK for Rust
 
-The official Rust client of the [GaiaDesk](https://gaiadesk.net) Platform API
-(`https://api.gaiadesk.net/v1`). Drive your GaiaDesk machines ("desks") from
-Rust: list them and see why one is offline, wake them, run commands and get
-exit codes back, stream output as it comes, copy files, run and follow
-background jobs, read stats, mint and revoke scoped agent tokens, read the
+[![CI](https://github.com/Gaia-Desk/gaiadesk-rust/actions/workflows/ci.yml/badge.svg)](https://github.com/Gaia-Desk/gaiadesk-rust/actions/workflows/ci.yml)
+[![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue)](#links)
+[![GitHub release](https://img.shields.io/github/v/release/Gaia-Desk/gaiadesk-rust)](https://github.com/Gaia-Desk/gaiadesk-rust/releases/latest)
+
+The official Rust SDK and async client library for the
+[GaiaDesk](https://gaiadesk.net) remote desktop Platform API
+(`https://api.gaiadesk.net/v1`), for remote access automation from Rust
+services, CI and AI agents. Drive your GaiaDesk machines ("desks") from Rust:
+list them and see why one is offline, wake them, run commands on remote
+computers and get exit codes back, stream output as it comes, transfer files,
+run and follow background jobs, read stats, mint and revoke scoped agent tokens, read the
 audit trail, manage webhooks (and verify their deliveries), and create
 support sessions for the embed SDK.
 
-- Crate: [`gaiadesk`](https://crates.io/crates/gaiadesk) (async, Tokio +
-  reqwest with rustls; a blocking client behind a feature)
+- Crate: `gaiadesk` (async, Tokio + reqwest with rustls; a blocking client
+  behind a feature); not on crates.io yet, see [Install](#install)
 - **End-to-end encrypted** desk operations by default when a desk publishes
   its key: the hosted API relays only ciphertext ([below](#end-to-end-encryption))
 - Typed errors with the API's `kind`, `reason`, HTTP status and request id
@@ -18,8 +24,7 @@ support sessions for the embed SDK.
 
 This crate contains no GaiaDesk application code: it speaks the documented
 HTTP API only. GaiaDesk itself is proprietary and not covered by this
-licence. Other SDKs: [TypeScript](https://github.com/Gaia-Desk/gaiadesk-typescript),
-[Python](https://github.com/Gaia-Desk/gaiadesk-python).
+licence. Other SDKs, the MCP server and the CLI are listed under [Links](#links).
 
 Licensed under either of [Apache License, Version 2.0](LICENSE-APACHE) or
 [MIT license](LICENSE-MIT) at your option.
@@ -47,14 +52,32 @@ Licensed under either of [Apache License, Version 2.0](LICENSE-APACHE) or
 - [Blocking client](#blocking-client)
 - [Features](#features)
 - [Development](#development)
+- [Links](#links)
 
 ## Install
+
+The crate is not on crates.io yet. Depend on it from GitHub at a release tag:
+
+```sh
+cargo add gaiadesk --git https://github.com/Gaia-Desk/gaiadesk-rust --tag v0.1.2
+cargo add tokio --features macros,rt-multi-thread
+cargo add futures-util   # for StreamExt on the output streams
+```
+
+or in `Cargo.toml`:
+
+```toml
+[dependencies]
+gaiadesk = { git = "https://github.com/Gaia-Desk/gaiadesk-rust", tag = "v0.1.2" }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+futures-util = "0.3"   # for StreamExt on the output streams
+```
+
+Once published to crates.io:
 
 ```toml
 [dependencies]
 gaiadesk = "0.1"
-tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
-futures-util = "0.3"   # for StreamExt on the output streams
 ```
 
 Minimum supported Rust version: **1.88**.
@@ -485,3 +508,23 @@ The tests run every endpoint against a mock of the API and its desks
 seals with its own implementation of the desk side), including streams,
 held waits, NDJSON uploads and downloads, rate limits, retries, a hostile
 server, a pinned TLS gateway and a Unix-socket local API.
+
+## Links
+
+- Crate: `gaiadesk` on crates.io (and its API docs on docs.rs) once published;
+  until then, depend on this repository's [release tags](https://github.com/Gaia-Desk/gaiadesk-rust/tags),
+  and `cargo doc --open` builds the API docs locally
+- Documentation: [Getting started](https://gaiadesk.net/docs/getting-started),
+  [The CLI for scripts and AI agents](https://gaiadesk.net/docs/cli-for-agents),
+  [Agent access](https://gaiadesk.net/docs/agent-access),
+  [Embedding GaiaDesk](https://gaiadesk.net/docs/embedding-gaiadesk) (support sessions),
+  [Security](https://gaiadesk.net/docs/security)
+- GaiaDesk SDKs: [TypeScript](https://github.com/Gaia-Desk/gaiadesk-typescript), [Python](https://github.com/Gaia-Desk/gaiadesk-python),
+  [Go](https://github.com/Gaia-Desk/gaiadesk-go), [Java and Kotlin](https://github.com/Gaia-Desk/gaiadesk-java),
+  [.NET](https://github.com/Gaia-Desk/gaiadesk-dotnet), [Ruby](https://github.com/Gaia-Desk/gaiadesk-ruby),
+  [PHP](https://github.com/Gaia-Desk/gaiadesk-php), Rust (this one);
+  the [MCP server](https://github.com/Gaia-Desk/gaiadesk-mcp) for AI assistants; the
+  [command line](https://github.com/Gaia-Desk/gaiadesk-cli), `gaiadesk-cli`
+- [Changelog](CHANGELOG.md) and [releases](https://github.com/Gaia-Desk/gaiadesk-rust/releases)
+- [Security policy](https://github.com/Gaia-Desk/gaiadesk-rust/security/policy)
+- Licence: [Apache-2.0](LICENSE-APACHE) or [MIT](LICENSE-MIT), at your option
